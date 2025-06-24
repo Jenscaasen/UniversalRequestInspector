@@ -1,0 +1,444 @@
+@using UniversalRequestInspector.Models
+@inject IJSRuntime JSRuntime
+
+<div class="card mb-3 request-card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <div class="d-flex align-items-center">
+            <span class="badge @GetMethodBadgeClass() me-2">@Request.Method</span>
+            <strong>@Request.Path</strong>
+            @if (Request.QueryParams.Any())
+            {
+                <small class="text-muted ms-2">
+                    <i class="bi bi-question-circle"></i>
+                    @Request.QueryParams.Count query param(s)
+                </small>
+            }
+            @if (Request.WasForwarded)
+            {
+                <small class="text-info ms-2">
+                    <i class="bi bi-arrow-right-circle"></i>
+                    Forwarded
+                </small>
+            }
+        </div>
+        <div class="d-flex align-items-center">
+            <small class="text-muted me-3">
+                <i class="bi bi-clock"></i>
+                @Request.Timestamp.ToString("HH:mm:ss")
+            </small>
+            @if (Request.WasForwarded && Request.Response != null)
+            {
+                <span class="badge @GetResponseBadgeClass() me-2">@Request.Response.StatusCode</span>
+            }
+            <button class="btn btn-sm btn-outline-secondary" @onclick="ToggleExpanded">
+                <i class="bi @(isExpanded ? "bi-chevron-up" : "bi-chevron-down")"></i>
+            </button>
+        </div>
+    </div>
+    
+    @if (isExpanded)
+    {
+        <div class="card-body">
+            <div class="row">
+                <!-- Request Details -->
+                <div class="col-md-6">
+                    <h6><i class="bi bi-info-circle me-1"></i>Request Details</h6>
+                    <table class="table table-sm">
+                        <tbody>
+                            <tr>
+                                <td class="fw-bold">Method:</td>
+                                <td><span class="badge @GetMethodBadgeClass()">@Request.Method</span></td>
+                            </tr>
+                            <tr>
+                                <td class="fw-bold">Path:</td>
+                                <td><code>@Request.Path</code></td>
+                            </tr>
+                            <tr>
+                                <td class="fw-bold">Timestamp:</td>
+                                <td>@Request.Timestamp.ToString("yyyy-MM-dd HH:mm:ss UTC")</td>
+                            </tr>
+                            <tr>
+                                <td class="fw-bold">Client IP:</td>
+                                <td>@Request.ClientIp</td>
+                            </tr>
+                            @if (!string.IsNullOrEmpty(Request.ContentType))
+                            {
+                                <tr>
+                                    <td class="fw-bold">Content-Type:</td>
+                                    <td><code>@Request.ContentType</code></td>
+                                </tr>
+                            }
+                            @if (Request.ContentLength > 0)
+                            {
+                                <tr>
+                                    <td class="fw-bold">Content-Length:</td>
+                                    <td>@Request.ContentLength bytes</td>
+                                </tr>
+                            }
+                            @if (Request.WasForwarded)
+                            {
+                                <tr>
+                                    <td class="fw-bold">Forwarded To:</td>
+                                    <td><code>@Request.ForwardedTo</code></td>
+                                </tr>
+                                @if (Request.ForwardDuration.HasValue)
+                                {
+                                    <tr>
+                                        <td class="fw-bold">Forward Duration:</td>
+                                        <td>@Request.ForwardDuration.Value.TotalMilliseconds ms</td>
+                                    </tr>
+                                }
+                            }
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Headers -->
+                <div class="col-md-6">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <h6><i class="bi bi-list-ul me-1"></i>Headers (@Request.Headers.Count)</h6>
+                        @if (Request.Headers.Any())
+                        {
+                            <button class="btn btn-sm btn-outline-secondary" @onclick="() => CopyToClipboard(GetHeadersAsText())">
+                                <i class="bi bi-clipboard"></i>
+                                Copy
+                            </button>
+                        }
+                    </div>
+                    @if (Request.Headers.Any())
+                    {
+                        <div class="headers-container">
+                            @foreach (var header in Request.Headers.OrderBy(h => h.Key))
+                            {
+                                <div class="header-item">
+                                    <strong>@header.Key:</strong>
+                                    <span class="text-break">@header.Value</span>
+                                </div>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        <p class="text-muted">No headers</p>
+                    }
+                </div>
+            </div>
+
+            <!-- Query Parameters -->
+            @if (Request.QueryParams.Any())
+            {
+                <div class="row mt-3">
+                    <div class="col-12">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <h6><i class="bi bi-question-circle me-1"></i>Query Parameters (@Request.QueryParams.Count)</h6>
+                            <button class="btn btn-sm btn-outline-secondary" @onclick="() => CopyToClipboard(GetQueryParamsAsText())">
+                                <i class="bi bi-clipboard"></i>
+                                Copy
+                            </button>
+                        </div>
+                        <div class="query-params-container">
+                            @foreach (var param in Request.QueryParams.OrderBy(p => p.Key))
+                            {
+                                <div class="param-item">
+                                    <strong>@param.Key:</strong>
+                                    <span class="text-break">@param.Value</span>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+            }
+
+            <!-- Request Body -->
+            @if (!string.IsNullOrEmpty(Request.Body))
+            {
+                <div class="row mt-3">
+                    <div class="col-12">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <h6><i class="bi bi-file-text me-1"></i>Request Body (@Request.ContentLength bytes)</h6>
+                            <div>
+                                <button class="btn btn-sm btn-outline-secondary me-2" @onclick="() => CopyToClipboard(Request.Body)">
+                                    <i class="bi bi-clipboard"></i>
+                                    Copy
+                                </button>
+                                <button class="btn btn-sm btn-outline-secondary" @onclick="ToggleBodyFormatted">
+                                    <i class="bi bi-code"></i>
+                                    @(showFormattedBody ? "Raw" : "Format")
+                                </button>
+                            </div>
+                        </div>
+                        <div class="body-container">
+                            @if (showFormattedBody && IsJsonContent(Request.Body, Request.ContentType))
+                            {
+                                <pre class="formatted-json"><code>@GetFormattedJson(Request.Body)</code></pre>
+                            }
+                            else
+                            {
+                                <pre class="raw-body"><code>@Request.Body</code></pre>
+                            }
+                        </div>
+                    </div>
+                </div>
+            }
+
+            <!-- Response Information -->
+            @if (Request.WasForwarded && Request.Response != null)
+            {
+                <div class="row mt-4">
+                    <div class="col-12">
+                        <div class="card border-info">
+                            <div class="card-header bg-info text-white">
+                                <h6 class="mb-0">
+                                    <i class="bi bi-arrow-left-circle me-2"></i>
+                                    Response from @Request.ForwardedTo
+                                </h6>
+                            </div>
+                            <div class="card-body">
+                                <div class="row">
+                                    <!-- Response Details -->
+                                    <div class="col-md-6">
+                                        <h6><i class="bi bi-info-circle me-1"></i>Response Details</h6>
+                                        <table class="table table-sm">
+                                            <tbody>
+                                                <tr>
+                                                    <td class="fw-bold">Status:</td>
+                                                    <td><span class="badge @GetResponseBadgeClass()">@Request.Response.StatusCode @Request.Response.StatusText</span></td>
+                                                </tr>
+                                                <tr>
+                                                    <td class="fw-bold">Timestamp:</td>
+                                                    <td>@Request.Response.Timestamp.ToString("yyyy-MM-dd HH:mm:ss UTC")</td>
+                                                </tr>
+                                                @if (!string.IsNullOrEmpty(Request.Response.ContentType))
+                                                {
+                                                    <tr>
+                                                        <td class="fw-bold">Content-Type:</td>
+                                                        <td><code>@Request.Response.ContentType</code></td>
+                                                    </tr>
+                                                }
+                                                @if (Request.Response.ContentLength > 0)
+                                                {
+                                                    <tr>
+                                                        <td class="fw-bold">Content-Length:</td>
+                                                        <td>@Request.Response.ContentLength bytes</td>
+                                                    </tr>
+                                                }
+                                            </tbody>
+                                        </table>
+                                    </div>
+
+                                    <!-- Response Headers -->
+                                    <div class="col-md-6">
+                                        <div class="d-flex justify-content-between align-items-center mb-2">
+                                            <h6><i class="bi bi-list-ul me-1"></i>Response Headers (@Request.Response.Headers.Count)</h6>
+                                            @if (Request.Response.Headers.Any())
+                                            {
+                                                <button class="btn btn-sm btn-outline-secondary" @onclick="() => CopyToClipboard(GetResponseHeadersAsText())">
+                                                    <i class="bi bi-clipboard"></i>
+                                                    Copy
+                                                </button>
+                                            }
+                                        </div>
+                                        @if (Request.Response.Headers.Any())
+                                        {
+                                            <div class="headers-container">
+                                                @foreach (var header in Request.Response.Headers.OrderBy(h => h.Key))
+                                                {
+                                                    <div class="header-item">
+                                                        <strong>@header.Key:</strong>
+                                                        <span class="text-break">@header.Value</span>
+                                                    </div>
+                                                }
+                                            </div>
+                                        }
+                                        else
+                                        {
+                                            <p class="text-muted">No headers</p>
+                                        }
+                                    </div>
+                                </div>
+
+                                <!-- Response Body -->
+                                @if (!string.IsNullOrEmpty(Request.Response.Body))
+                                {
+                                    <div class="row mt-3">
+                                        <div class="col-12">
+                                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                                <h6><i class="bi bi-file-text me-1"></i>Response Body (@Request.Response.ContentLength bytes)</h6>
+                                                <div>
+                                                    <button class="btn btn-sm btn-outline-secondary me-2" @onclick="() => CopyToClipboard(Request.Response.Body)">
+                                                        <i class="bi bi-clipboard"></i>
+                                                        Copy
+                                                    </button>
+                                                    <button class="btn btn-sm btn-outline-secondary" @onclick="ToggleResponseBodyFormatted">
+                                                        <i class="bi bi-code"></i>
+                                                        @(showFormattedResponseBody ? "Raw" : "Format")
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <div class="body-container">
+                                                @if (showFormattedResponseBody && IsJsonContent(Request.Response.Body, Request.Response.ContentType))
+                                                {
+                                                    <pre class="formatted-json"><code>@GetFormattedJson(Request.Response.Body)</code></pre>
+                                                }
+                                                else
+                                                {
+                                                    <pre class="raw-body"><code>@Request.Response.Body</code></pre>
+                                                }
+                                            </div>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public RequestInfo Request { get; set; } = new();
+    
+    private bool isExpanded = false;
+    private bool showFormattedBody = false;
+    private bool showFormattedResponseBody = false;
+
+    private void ToggleExpanded()
+    {
+        isExpanded = !isExpanded;
+    }
+
+    private void ToggleBodyFormatted()
+    {
+        showFormattedBody = !showFormattedBody;
+    }
+
+    private void ToggleResponseBodyFormatted()
+    {
+        showFormattedResponseBody = !showFormattedResponseBody;
+    }
+
+    private string GetMethodBadgeClass()
+    {
+        return Request.Method.ToUpper() switch
+        {
+            "GET" => "bg-success",
+            "POST" => "bg-primary",
+            "PUT" => "bg-warning",
+            "DELETE" => "bg-danger",
+            "PATCH" => "bg-info",
+            "OPTIONS" => "bg-secondary",
+            "HEAD" => "bg-dark",
+            _ => "bg-secondary"
+        };
+    }
+
+    private string GetResponseBadgeClass()
+    {
+        if (Request.Response == null) return "bg-secondary";
+        
+        return Request.Response.StatusCode switch
+        {
+            >= 200 and < 300 => "bg-success",
+            >= 300 and < 400 => "bg-warning",
+            >= 400 and < 500 => "bg-danger",
+            >= 500 => "bg-dark",
+            _ => "bg-secondary"
+        };
+    }
+
+    private bool IsJsonContent(string body, string contentType)
+    {
+        return contentType.Contains("application/json", StringComparison.OrdinalIgnoreCase) ||
+               body.TrimStart().StartsWith("{") ||
+               body.TrimStart().StartsWith("[");
+    }
+
+    private string GetFormattedJson(string jsonBody)
+    {
+        try
+        {
+            var jsonDocument = System.Text.Json.JsonDocument.Parse(jsonBody);
+            return System.Text.Json.JsonSerializer.Serialize(jsonDocument, new System.Text.Json.JsonSerializerOptions
+            {
+                WriteIndented = true
+            });
+        }
+        catch
+        {
+            return jsonBody;
+        }
+    }
+
+    private string GetHeadersAsText()
+    {
+        return string.Join("\n", Request.Headers.Select(h => $"{h.Key}: {h.Value}"));
+    }
+
+    private string GetQueryParamsAsText()
+    {
+        return string.Join("\n", Request.QueryParams.Select(p => $"{p.Key}={p.Value}"));
+    }
+
+    private string GetResponseHeadersAsText()
+    {
+        if (Request.Response == null) return string.Empty;
+        return string.Join("\n", Request.Response.Headers.Select(h => $"{h.Key}: {h.Value}"));
+    }
+
+    private async Task CopyToClipboard(string text)
+    {
+        await JSRuntime.InvokeVoidAsync("navigator.clipboard.writeText", text);
+    }
+}
+
+<style>
+    .request-card {
+        border-left: 4px solid var(--bs-primary);
+        transition: all 0.2s ease;
+    }
+
+    .request-card:hover {
+        box-shadow: 0 0.25rem 0.5rem rgba(0, 0, 0, 0.1);
+    }
+
+    .headers-container, .query-params-container {
+        max-height: 200px;
+        overflow-y: auto;
+        border: 1px solid #dee2e6;
+        border-radius: 0.375rem;
+        padding: 0.5rem;
+        background-color: #f8f9fa;
+    }
+
+    .header-item, .param-item {
+        margin-bottom: 0.25rem;
+        padding: 0.25rem;
+        background-color: white;
+        border-radius: 0.25rem;
+        border: 1px solid #e9ecef;
+    }
+
+    .body-container {
+        max-height: 300px;
+        overflow-y: auto;
+        border: 1px solid #dee2e6;
+        border-radius: 0.375rem;
+        background-color: #f8f9fa;
+    }
+
+    .formatted-json, .raw-body {
+        margin: 0;
+        padding: 1rem;
+        background-color: #f8f9fa;
+        border: none;
+        font-size: 0.875rem;
+        white-space: pre-wrap;
+        word-break: break-all;
+    }
+
+    .formatted-json {
+        background-color: #fff;
+    }
+</style>
